@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f5d8a">
+  <title>Slide Sorter</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <h1 class="title">Slide Sorter</h1>
+    <div class="toolbar-buttons">
+      <button id="btn-add" class="btn">＋ Add photos</button>
+      <button id="btn-new-group" class="btn">＋ New group</button>
+      <button id="btn-undo" class="btn" disabled>↶ Undo</button>
+      <button id="btn-export" class="btn btn-primary">Export</button>
+      <button id="btn-menu" class="btn" aria-label="More options">⋯</button>
+    </div>
+    <input id="file-input" type="file" accept="image/*" multiple hidden>
+  </header>
+
+  <main class="panes">
+    <section class="pane" id="pane-unsorted">
+      <div class="pane-header">
+        <h2>Unsorted <span id="unsorted-count" class="count"></span></h2>
+      </div>
+      <div class="pane-body" id="unsorted-body"></div>
+    </section>
+
+    <section class="pane" id="pane-groups">
+      <div class="pane-header">
+        <h2>Groups <span id="groups-count" class="count"></span></h2>
+      </div>
+      <div class="pane-body" id="groups-body"></div>
+    </section>
+  </main>
+
+  <div id="action-bar" class="action-bar" hidden>
+    <div class="action-info">
+      <strong id="selected-count"></strong>
+      <span class="hint">Tap a <span class="slot-sample">⬇</span> to put them there</span>
+    </div>
+    <div class="action-buttons">
+      <button id="btn-to-group" class="btn btn-primary">Add to group…</button>
+      <button id="btn-to-unsorted" class="btn">Back to Unsorted</button>
+      <button id="btn-remove" class="btn btn-danger">Remove</button>
+      <button id="btn-clear" class="btn">Cancel</button>
+    </div>
+  </div>
+
+  <div id="viewer" class="viewer" hidden>
+    <img id="viewer-img" alt="">
+    <button id="viewer-close" class="viewer-btn viewer-close" aria-label="Close">✕</button>
+    <button id="viewer-prev" class="viewer-btn viewer-prev" aria-label="Previous">‹</button>
+    <button id="viewer-next" class="viewer-btn viewer-next" aria-label="Next">›</button>
+    <div class="viewer-footer">
+      <span id="viewer-label"></span>
+      <button id="viewer-select" class="btn"></button>
+    </div>
+  </div>
+
+  <dialog id="dialog" class="dialog">
+    <form method="dialog" id="dialog-form">
+      <h3 id="dialog-title"></h3>
+      <div id="dialog-message"></div>
+      <input id="dialog-input" type="text" autocomplete="off" hidden>
+      <div id="dialog-buttons" class="dialog-buttons"></div>
+    </form>
+  </dialog>
+
+  <div id="progress" class="progress-overlay" hidden>
+    <div class="progress-box">
+      <p id="progress-text"></p>
+      <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
