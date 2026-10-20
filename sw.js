@@ -1,6 +1,6 @@
 // Network first so updates show up straight away; the cache lets the app
 // open without a connection.
-const CACHE = 'slide-sorter-v1';
+const CACHE = 'slide-sorter-v2';
 const FILES = [
   './',
   'index.html',
@@ -8,6 +8,8 @@ const FILES = [
   'manifest.webmanifest',
   'js/app.js',
   'js/db.js',
+  'js/exif.js',
+  'js/tags.js',
   'js/zip.js',
   'icons/icon.svg',
   'icons/icon-192.png',

@@ -18,23 +18,27 @@ function crc32(bytes) {
 }
 
 function dosDateTime(date) {
+  if (date.getFullYear() < 1980) date = new Date(1980, 0, 1); // earliest a ZIP can store
   const time = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
   const day = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
   return { time, day };
 }
 
-// entries: [{ name: string, blob: Blob }]. Returns a Blob of the ZIP file.
+// entries: [{ name, blob, date? }], where blob may be a function returning a
+// Promise of the Blob so files are prepared one at a time. Returns the ZIP Blob.
 export async function makeZip(entries, onProgress = () => {}) {
   if (entries.length > 0xffff) throw new Error('Too many files for one ZIP.');
 
   const encoder = new TextEncoder();
-  const { time, day } = dosDateTime(new Date());
+  const now = new Date();
   const parts = [];
   const central = [];
   let offset = 0;
 
   for (let i = 0; i < entries.length; i++) {
-    const { name, blob } = entries[i];
+    const { name } = entries[i];
+    const blob = typeof entries[i].blob === 'function' ? await entries[i].blob() : entries[i].blob;
+    const { time, day } = dosDateTime(entries[i].date || now);
     const nameBytes = encoder.encode(name);
     const crc = crc32(new Uint8Array(await blob.arrayBuffer()));
     const size = blob.size;

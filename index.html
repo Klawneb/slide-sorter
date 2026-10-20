@@ -12,10 +12,16 @@
 </head>
 <body>
   <header class="toolbar">
-    <h1 class="title">Slide Sorter</h1>
+    <div class="toolbar-left">
+      <h1 class="title">Slide Sorter</h1>
+      <nav class="tabs">
+        <button id="tab-photos" class="tab">Photos</button>
+        <button id="tab-tagger" class="tab">Tagger</button>
+      </nav>
+    </div>
     <div class="toolbar-buttons">
       <button id="btn-add" class="btn">＋ Add photos</button>
-      <button id="btn-new-group" class="btn">＋ New group</button>
+      <button id="btn-tags" class="btn">Tags</button>
       <button id="btn-undo" class="btn" disabled>↶ Undo</button>
       <button id="btn-export" class="btn btn-primary">Export</button>
       <button id="btn-menu" class="btn" aria-label="More options">⋯</button>
@@ -23,30 +29,57 @@
     <input id="file-input" type="file" accept="image/*" multiple hidden>
   </header>
 
-  <main class="panes">
-    <section class="pane" id="pane-unsorted">
-      <div class="pane-header">
-        <h2>Unsorted <span id="unsorted-count" class="count"></span></h2>
+  <main id="view-photos" class="view">
+    <div class="filter-bar">
+      <div class="filter-top">
+        <span id="filter-summary" class="filter-summary"></span>
+        <div class="filter-actions">
+          <button id="btn-show-all" class="btn btn-small">Show all</button>
+          <button id="btn-select-all" class="btn btn-small">Select all</button>
+        </div>
       </div>
-      <div class="pane-body" id="unsorted-body"></div>
-    </section>
+      <div id="filter-chips" class="chips"></div>
+    </div>
+    <div id="photos-body" class="view-body"></div>
+  </main>
 
-    <section class="pane" id="pane-groups">
-      <div class="pane-header">
-        <h2>Groups <span id="groups-count" class="count"></span></h2>
+  <main id="view-tagger" class="view tagger" hidden>
+    <div class="tagger-photo">
+      <img id="tagger-img" alt="">
+      <div id="tagger-done" class="tagger-done" hidden></div>
+    </div>
+    <div class="tagger-panel">
+      <div class="tagger-head">
+        <span id="tagger-progress"></span>
+        <div class="segmented" role="group" aria-label="Which photos">
+          <button id="tagger-mode-untagged" class="seg">Untagged</button>
+          <button id="tagger-mode-all" class="seg">All photos</button>
+        </div>
       </div>
-      <div class="pane-body" id="groups-body"></div>
-    </section>
+      <div id="tagger-current" class="tagger-current"></div>
+      <button id="tagger-copy" class="btn btn-copy"></button>
+      <div class="tag-entry">
+        <input id="tagger-input" type="text" placeholder="Type a tag, e.g. 1980 or Beach" autocomplete="off" enterkeyhint="done">
+        <button id="tagger-add" class="btn">Add</button>
+      </div>
+      <div id="tagger-chips" class="chips"></div>
+      <div class="tagger-nav">
+        <button id="tagger-back" class="btn">◀ Back</button>
+        <button id="tagger-next" class="btn btn-primary">Next ▶</button>
+      </div>
+      <button id="tagger-remove" class="btn btn-danger btn-small tagger-remove">Remove this photo</button>
+    </div>
   </main>
 
   <div id="action-bar" class="action-bar" hidden>
     <div class="action-info">
       <strong id="selected-count"></strong>
-      <span class="hint">Tap a <span class="slot-sample">⬇</span> to put them there</span>
+      <span id="action-hint" class="hint"></span>
     </div>
     <div class="action-buttons">
-      <button id="btn-to-group" class="btn btn-primary">Add to group…</button>
-      <button id="btn-to-unsorted" class="btn">Back to Unsorted</button>
+      <button id="btn-tag-selected" class="btn btn-primary">Tags…</button>
+      <button id="btn-tag-one-by-one" class="btn">Tag one by one</button>
+      <button id="btn-move" class="btn">Move…</button>
       <button id="btn-remove" class="btn btn-danger">Remove</button>
       <button id="btn-clear" class="btn">Cancel</button>
     </div>
@@ -70,6 +103,19 @@
       <input id="dialog-input" type="text" autocomplete="off" hidden>
       <div id="dialog-buttons" class="dialog-buttons"></div>
     </form>
+  </dialog>
+
+  <dialog id="tag-sheet" class="dialog">
+    <h3 id="tag-sheet-title"></h3>
+    <p class="hint">Tap a tag to add it to all of them. Tap a ✓ tag to take it off all of them.</p>
+    <div class="tag-entry">
+      <input id="tag-sheet-input" type="text" placeholder="Type a tag" autocomplete="off" enterkeyhint="done">
+      <button id="tag-sheet-add" class="btn">Add</button>
+    </div>
+    <div id="tag-sheet-chips" class="chips chips-scroll"></div>
+    <div class="dialog-buttons inline">
+      <button id="tag-sheet-done" class="btn btn-primary">Done</button>
+    </div>
   </dialog>
 
   <div id="progress" class="progress-overlay" hidden>
