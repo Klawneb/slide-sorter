@@ -1,5 +1,5 @@
 import * as db from './db.js';
-import { makeZip } from './zip.js';
+import { makeZip, readZip } from './zip.js';
 import { setJpegDate } from './exif.js';
 import { sortTags, yearOf, displayOrder, planExport } from './tags.js';
 
@@ -23,6 +23,9 @@ let selection = [];      // photo ids, in the order they were tapped
 let moving = false;      // showing ⬇ slots to move the selection
 const filter = { tags: new Set(), untagged: false };
 const undoStack = [];
+
+// When the last backup was made and how many changes since, for reminders.
+const backupStatus = { at: 0, changes: 0, snoozeUntil: 0, ...JSON.parse(localStorage.getItem('backup') || '{}') };
 const thumbUrls = new Map();
 const tiles = new Map();
 
@@ -107,14 +110,25 @@ function undo() {
   render();
 }
 
-let saveTimer = null;
+// Saved straight away on every change, so a crash can't lose more than the
+// change being made. IndexedDB copies `state` when the save starts, and runs
+// saves in the order they were made.
+let saveError = null;
+let active = true; // false once another window has taken over
 function persist() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveNow, 300);
-}
-function saveNow() {
-  clearTimeout(saveTimer);
-  db.saveState(state).catch(err => console.error('Saving failed', err));
+  if (!active) return;
+  backupStatus.changes++;
+  localStorage.setItem('backup', JSON.stringify(backupStatus));
+  db.saveState(state).then(() => {
+    if (saveError) {
+      saveError = null;
+      renderNotice();
+    }
+  }, err => {
+    console.error('Saving failed', err);
+    saveError = err;
+    renderNotice();
+  });
 }
 
 // ---------- Tag edits ----------
@@ -254,6 +268,105 @@ function render() {
   }
   if ($('tag-sheet').open) renderSheet();
   if (!$('viewer').hidden) updateViewer();
+  renderNotice();
+  saveUi();
+}
+
+// Where he was (tab, tagger position, filter), so reopening the app carries
+// on from the same place.
+function saveUi() {
+  if (!active) return;
+  localStorage.setItem('ui', JSON.stringify({
+    view,
+    filterTags: [...filter.tags],
+    filterUntagged: filter.untagged,
+    tagger: { mode: tagger.mode, ids: tagger.ids, current: taggerId() || null, lastTags: tagger.lastTags },
+  }));
+}
+
+function restoreUi() {
+  let ui;
+  try {
+    ui = JSON.parse(localStorage.getItem('ui'));
+  } catch {
+    return;
+  }
+  if (!ui) return;
+  view = ui.view === 'tagger' ? 'tagger' : 'photos';
+  ui.filterTags?.forEach(t => filter.tags.add(t));
+  filter.untagged = !!ui.filterUntagged;
+  normalize(); // drops filter tags that no longer exist
+  if (ui.tagger?.ids) {
+    const live = new Set(state.order);
+    tagger.mode = ui.tagger.mode;
+    tagger.ids = ui.tagger.ids.filter(id => live.has(id));
+    tagger.lastTags = ui.tagger.lastTags || [];
+    const at = tagger.ids.indexOf(ui.tagger.current);
+    tagger.index = at >= 0 ? at : ui.tagger.current ? 0 : tagger.ids.length;
+  }
+}
+
+// ---------- Notices: save problems, storage protection, backup reminders ----------
+
+let storageProtected = true;
+
+function renderNotice() {
+  const box = $('notice');
+  const buttons = [];
+  let text = '';
+  let kind = 'info';
+  const days = ms => ms / 86_400_000;
+
+  if (!active) {
+    box.hidden = true;
+    return;
+  }
+  if (saveError) {
+    kind = 'error';
+    text = `⚠ Your last change couldn’t be saved (${saveError.message || saveError}). ` +
+      (saveError.name === 'QuotaExceededError' ? 'The tablet may be out of space.' : '');
+    buttons.push(['Try again', () => persist()]);
+  } else if (!storageProtected && photos.size && Date.now() > (Number(localStorage.getItem('storageNoteSnooze')) || 0)) {
+    text = 'Your work is saved on this tablet, but Chrome might clear it if the tablet runs low on space. ' +
+      'To protect it, install the app (Chrome menu ⋮ → “Add to Home screen”) and open it from its icon. Saving a backup also keeps it safe.';
+    buttons.push(['Back up now', backupEverything]);
+    buttons.push(['Not now', () => {
+      localStorage.setItem('storageNoteSnooze', Date.now() + 7 * 86_400_000);
+      renderNotice();
+    }]);
+  } else if (photos.size && Date.now() > backupStatus.snoozeUntil && (
+    (!backupStatus.at && backupStatus.changes >= 30) ||
+    (backupStatus.at && (backupStatus.changes >= 150 || (backupStatus.changes > 0 && days(Date.now() - backupStatus.at) >= 14)))
+  )) {
+    text = backupStatus.at
+      ? `Your last backup was ${Math.round(days(Date.now() - backupStatus.at))} days ago. It’s a good idea to save a new one.`
+      : 'Tip: save a backup of your photos and tags, so nothing is lost if anything happens to the tablet.';
+    buttons.push(['Back up now', backupEverything]);
+    buttons.push(['Later', () => {
+      backupStatus.snoozeUntil = Date.now() + 3 * 86_400_000;
+      localStorage.setItem('backup', JSON.stringify(backupStatus));
+      renderNotice();
+    }]);
+  }
+
+  box.hidden = !text;
+  box.className = 'notice ' + kind;
+  $('notice-text').textContent = text;
+  $('notice-buttons').replaceChildren(...buttons.map(([label, fn]) => {
+    const b = document.createElement('button');
+    b.className = 'btn btn-small';
+    b.textContent = label;
+    b.onclick = fn;
+    return b;
+  }));
+}
+
+// Asks Chrome not to clear the app's storage when space runs low. Chrome
+// decides by itself; installed apps are normally allowed.
+async function checkStorage() {
+  if (!navigator.storage?.persisted) return;
+  storageProtected = await navigator.storage.persisted() || await navigator.storage.persist();
+  renderNotice();
 }
 
 function renderPhotos() {
@@ -732,7 +845,7 @@ async function importFiles(files) {
   // Scan order is the best first guess at the right order.
   fresh.sort((a, b) => a.lastModified - b.lastModified || a.name.localeCompare(b.name, undefined, { numeric: true }));
 
-  navigator.storage?.persist?.();
+  checkStorage();
   try {
     for (let i = 0; i < fresh.length; i++) {
       showProgress(`Adding photos… ${i + 1} of ${fresh.length}`, i, fresh.length);
@@ -750,6 +863,7 @@ async function importFiles(files) {
       await db.putPhoto(photo);
       photos.set(photo.id, photo);
       state.order.push(photo.id);
+      persist();
     }
   } catch (err) {
     console.error(err);
@@ -763,7 +877,7 @@ async function importFiles(files) {
     state.order.push(...restored);
   }
   normalize();
-  saveNow();
+  persist();
   render();
   if (skipped) tell('Some photos were already here', `${skipped} of the chosen photos had already been added, so they were skipped.`);
 }
@@ -960,15 +1074,130 @@ async function exportZip(plan) {
     `When it finishes, open the Files app, tap “Slides.zip” and choose Extract. ${AFTER_EXPORT}`);
 }
 
+// ---------- Backup and restore ----------
+
+// A backup is a ZIP holding every photo exactly as it was added, plus the
+// tags and order, so the whole project can be rebuilt on any device.
+async function backupEverything() {
+  if (!photos.size) return tell('Nothing to back up yet', 'Add some photos first.');
+  const ok = await confirmIt('Back up everything?',
+    `This saves all ${plural(state.order.length, 'photo')} and their tags into one file in Downloads. ` +
+    'Keep it somewhere safe, for example copy it to Google Drive or a computer. ' +
+    'If anything ever goes wrong, “Restore from a backup” in the ⋯ menu brings everything back.',
+    'Back up');
+  if (!ok) return;
+
+  const live = state.order.map(id => photos.get(id));
+  const meta = {
+    app: 'slide-sorter',
+    format: 1,
+    savedAt: new Date().toISOString(),
+    state: { ...state, removed: [] },
+    photos: live.map(({ id, name, size, lastModified, type, order }) => ({ id, name, size, lastModified, type, order })),
+  };
+  const entries = [{ name: 'backup.json', blob: new Blob([JSON.stringify(meta)], { type: 'application/json' }) }];
+  for (const p of live) {
+    entries.push({ name: `photos/${p.id}`, blob: p.blob, date: new Date(p.lastModified) });
+    if (p.thumb) entries.push({ name: `thumbs/${p.id}`, blob: p.thumb });
+  }
+
+  let zip;
+  try {
+    zip = await makeZip(entries, (done, total) => showProgress(`Making backup… ${done} of ${total}`, done, total));
+  } catch (err) {
+    hideProgress();
+    return tell('Couldn’t make the backup', err.message);
+  }
+  hideProgress();
+  const stamp = new Date().toISOString().slice(0, 10);
+  const url = URL.createObjectURL(zip);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Slide Sorter backup ${stamp}.zip`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+  Object.assign(backupStatus, { at: Date.now(), changes: 0, snoozeUntil: 0 });
+  localStorage.setItem('backup', JSON.stringify(backupStatus));
+  renderNotice();
+  await tell('Backup saved', `“Slide Sorter backup ${stamp}.zip” is in Downloads. ` +
+    'For extra safety, copy it to Google Drive or a computer.');
+}
+
+async function restoreBackup(file) {
+  let files, meta;
+  try {
+    files = await readZip(file);
+    meta = JSON.parse(await files.get('backup.json').text());
+    if (meta.app !== 'slide-sorter') throw new Error();
+  } catch {
+    return tell('That isn’t a Slide Sorter backup', 'Choose a file called “Slide Sorter backup ….zip”.');
+  }
+
+  const when = new Date(meta.savedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  const ok = await confirmIt('Restore this backup?',
+    `It's from ${when} and has ${plural(meta.photos.length, 'photo')}. ` +
+    'Everything currently in Slide Sorter will be replaced by what’s in the backup.', 'Restore', true);
+  if (!ok) return;
+
+  try {
+    // Photos first: if this is interrupted, the current work is still intact.
+    for (let i = 0; i < meta.photos.length; i++) {
+      showProgress(`Restoring photos… ${i + 1} of ${meta.photos.length}`, i, meta.photos.length);
+      const m = meta.photos[i];
+      const data = files.get(`photos/${m.id}`);
+      if (!data) continue;
+      const thumb = files.get(`thumbs/${m.id}`);
+      await db.putPhoto({
+        ...m,
+        blob: new Blob([data], { type: m.type }),
+        thumb: thumb ? new Blob([thumb], { type: 'image/jpeg' }) : await makeThumb(data),
+      });
+    }
+    showProgress('Finishing…', 1, 1);
+    const keep = new Set(meta.photos.map(p => p.id));
+    await db.saveState(migrate(meta.state));
+    await db.deletePhotos([...photos.keys()].filter(id => !keep.has(id)));
+  } catch (err) {
+    hideProgress();
+    return tell('Restore didn’t finish', `${err.message}. Nothing was lost; you can try again.`);
+  }
+  hideProgress();
+  // Start fresh from what's now stored.
+  localStorage.removeItem('ui');
+  location.reload();
+}
+
 // ---------- Menu ----------
+
+async function storageSummary() {
+  const mb = n => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+  let text = storageProtected ? 'Your work is saved on this tablet and protected.' : 'Your work is saved on this tablet.';
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    text += ` Using ${mb(usage)} of the ${mb(quota)} available.`;
+    if (usage / quota > 0.8) text += ' Space is getting low: save a backup soon.';
+  } catch {
+    // estimate() unsupported: skip the numbers
+  }
+  return text;
+}
 
 async function showMenu() {
   const size = Number(localStorage.getItem('tileSize')) || TILE_SIZES[1];
   const sizeName = ['Small', 'Medium', 'Large'][TILE_SIZES.indexOf(size)] || 'Medium';
+  const last = backupStatus.at
+    ? new Date(backupStatus.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'never';
   const choice = await ask({
     title: 'More options',
+    message: await storageSummary(),
     stacked: true,
     buttons: [
+      { label: `Back up everything (last backup: ${last})`, value: 'backup' },
+      { label: 'Restore from a backup', value: 'restore' },
       ...(canPickFolder ? [{ label: 'Add every photo in a folder', value: 'folder' }] : []),
       { label: `Photo size: ${sizeName} (tap to change)`, value: 'size' },
       { label: 'How to use', value: 'help' },
@@ -976,7 +1205,9 @@ async function showMenu() {
       { label: 'Close' },
     ],
   });
-  if (choice === 'folder') importFolder();
+  if (choice === 'backup') backupEverything();
+  else if (choice === 'restore') $('restore-input').click();
+  else if (choice === 'folder') importFolder();
   else if (choice === 'size') {
     localStorage.setItem('tileSize', TILE_SIZES[(TILE_SIZES.indexOf(size) + 1) % TILE_SIZES.length]);
     applyTileSize();
@@ -993,7 +1224,8 @@ function showHelp() {
     'On the Photos screen, tap tags at the top to show only those photos.',
     'Tap photos to select them, then “Tags…” to tag them all at once, or “Move…” to change their order within a year.',
     'Tap ⤢ on a photo to see it bigger. Made a mistake? Tap “↶ Undo”.',
-    'Your work is saved as you go. When finished, tap Export.',
+    'Your work is saved as you go, and the app opens where you left off. When finished, tap Export.',
+    'Now and then, use ⋯ → “Back up everything” and keep the file somewhere safe, like Google Drive.',
   ]) {
     const li = document.createElement('li');
     li.textContent = text;
@@ -1038,6 +1270,17 @@ function wire() {
   $('btn-undo').addEventListener('click', undo);
   $('btn-export').addEventListener('click', exportPhotos);
   $('btn-menu').addEventListener('click', showMenu);
+  $('taken-over-btn').addEventListener('click', () => location.reload());
+  let scrollTimer = null;
+  $('photos-body').addEventListener('scroll', () => {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => localStorage.setItem('scroll', $('photos-body').scrollTop), 300);
+  }, { passive: true });
+  $('restore-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) restoreBackup(file);
+  });
 
   // Photos view
   $('btn-show-all').addEventListener('click', () => {
@@ -1119,24 +1362,46 @@ function wire() {
     else if (e.key === 'Escape') history.back();
   });
 
-  document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+}
+
+// Only one window may edit at a time, or two copies of the app would save
+// over each other. The newest window takes over; older ones stop saving.
+async function claimWindow() {
+  if (!navigator.locks) return;
+  await new Promise(resolve => {
+    navigator.locks.request('slide-sorter', { steal: true }, () => {
+      resolve();
+      return new Promise(() => {}); // held until this page closes
+    }).catch(() => {
+      active = false;
+      for (const d of document.querySelectorAll('dialog[open]')) d.close();
+      $('taken-over').hidden = false;
+    });
+  });
 }
 
 async function init() {
   applyTileSize();
   wire();
+  await claimWindow();
   const [records, saved] = await Promise.all([db.getAllPhotos(), db.loadState()]);
   for (const r of records) photos.set(r.id, r);
   if (saved) state = migrate(saved);
-  // Removed photos only need keeping for undo, which doesn't survive a reload.
+  // Removed photos only need keeping for undo, which doesn't survive a
+  // reload. Delete the photos before saving the state, so an interruption
+  // can't bring them back.
   if (state.removed.length) {
     await db.deletePhotos(state.removed);
     state.removed.forEach(id => photos.delete(id));
     state.removed = [];
+    await db.saveState(state);
   }
   normalize();
   startTagger('untagged');
+  restoreUi();
   render();
+  if (view === 'photos') $('photos-body').scrollTop = Number(localStorage.getItem('scroll')) || 0;
+  checkStorage();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 

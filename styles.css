@@ -395,3 +395,18 @@ button { font: inherit; }
 }
 .progress-track { height: 14px; background: #e5e1d8; border-radius: 7px; overflow: hidden; }
 .progress-bar { height: 100%; width: 0; background: var(--primary); transition: width 0.15s; }
+
+/* Notice bar: save problems, storage protection, backup reminders */
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fff6dc;
+  border-bottom: 1px solid #e8d49a;
+  line-height: 1.4;
+}
+.notice.error { background: #fde8e6; border-bottom-color: #e7a7a1; color: #7d1a14; }
+.notice-buttons { display: flex; gap: 8px; }

@@ -27,7 +27,13 @@
       <button id="btn-menu" class="btn" aria-label="More options">⋯</button>
     </div>
     <input id="file-input" type="file" accept="image/*" multiple hidden>
+    <input id="restore-input" type="file" accept=".zip,application/zip" hidden>
   </header>
+
+  <div id="notice" class="notice" hidden>
+    <span id="notice-text"></span>
+    <div id="notice-buttons" class="notice-buttons"></div>
+  </div>
 
   <main id="view-photos" class="view">
     <div class="filter-bar">
@@ -122,6 +128,13 @@
     <div class="progress-box">
       <p id="progress-text"></p>
       <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+    </div>
+  </div>
+
+  <div id="taken-over" class="progress-overlay" hidden>
+    <div class="progress-box">
+      <p>Slide Sorter was opened in another window, so this one has stopped to keep your work safe.</p>
+      <button id="taken-over-btn" class="btn btn-primary">Use this window instead</button>
     </div>
   </div>
 

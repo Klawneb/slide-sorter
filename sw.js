@@ -1,6 +1,7 @@
-// Network first so updates show up straight away; the cache lets the app
-// open without a connection.
-const CACHE = 'slide-sorter-v2';
+// Network first so updates show up straight away, but if the network is
+// slow or missing the cached copy is used, so the app always opens.
+const CACHE = 'slide-sorter-v3';
+const NETWORK_WAIT_MS = 3000;
 const FILES = [
   './',
   'index.html',
@@ -28,15 +29,21 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
-  e.respondWith(
-    fetch(e.request)
-      .then(res => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(e.request, { ignoreSearch: true })),
-  );
+
+  const fromNetwork = fetch(e.request).then(res => {
+    if (res.ok) {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(e.request, copy));
+    }
+    return res;
+  });
+  e.waitUntil(fromNetwork.catch(() => {}));
+
+  e.respondWith((async () => {
+    const slow = new Promise(resolve => setTimeout(resolve, NETWORK_WAIT_MS));
+    const res = await Promise.race([fromNetwork.catch(() => null), slow]);
+    if (res) return res;
+    // Offline or slow: use the cached copy if there is one.
+    return (await caches.match(e.request, { ignoreSearch: true })) || fromNetwork;
+  })());
 });

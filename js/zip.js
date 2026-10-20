@@ -1,5 +1,5 @@
-// Minimal ZIP writer. Files are stored uncompressed: JPEGs don't shrink
-// anyway, and the photo bytes are copied exactly as they were.
+// Minimal ZIP writer and reader. Files are stored uncompressed: JPEGs don't
+// shrink anyway, and the photo bytes are copied exactly as they were.
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -94,4 +94,41 @@ export async function makeZip(entries, onProgress = () => {}) {
   end.setUint32(16, offset, true);
 
   return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
+}
+
+// Reads a ZIP made by makeZip (uncompressed entries only). Returns a Map of
+// name -> Blob. The Blobs are slices of `file`, so nothing big is loaded.
+export async function readZip(file) {
+  const tailSize = Math.min(file.size, 22 + 0xffff);
+  const tail = new DataView(await file.slice(file.size - tailSize).arrayBuffer());
+  let end = -1;
+  for (let i = tail.byteLength - 22; i >= 0; i--) {
+    if (tail.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  }
+  if (end < 0) throw new Error('This isn’t a ZIP file.');
+  const count = tail.getUint16(end + 10, true);
+  const cdSize = tail.getUint32(end + 12, true);
+  const cdOffset = tail.getUint32(end + 16, true);
+
+  const cd = new DataView(await file.slice(cdOffset, cdOffset + cdSize).arrayBuffer());
+  const decoder = new TextDecoder();
+  const entries = new Map();
+  let p = 0;
+  for (let i = 0; i < count; i++) {
+    if (cd.getUint32(p, true) !== 0x02014b50) throw new Error('The ZIP file is damaged.');
+    const method = cd.getUint16(p + 10, true);
+    const size = cd.getUint32(p + 20, true);
+    const nameLength = cd.getUint16(p + 28, true);
+    const extraLength = cd.getUint16(p + 30, true);
+    const commentLength = cd.getUint16(p + 32, true);
+    const localOffset = cd.getUint32(p + 42, true);
+    const name = decoder.decode(new Uint8Array(cd.buffer, p + 46, nameLength));
+    if (method !== 0) throw new Error('This ZIP wasn’t made by Slide Sorter.');
+
+    const local = new DataView(await file.slice(localOffset, localOffset + 30).arrayBuffer());
+    const start = localOffset + 30 + local.getUint16(26, true) + local.getUint16(28, true);
+    entries.set(name, file.slice(start, start + size));
+    p += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
 }
