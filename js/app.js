@@ -6,7 +6,10 @@ import { sortTags, yearOf, displayOrder, planExport } from './tags.js';
 const $ = id => document.getElementById(id);
 
 const THUMB_SIZE = 400;
-const TILE_SIZES = [110, 150, 200];
+const TILE_SIZES = [110, 150, 200, 260];
+const TILE_NAMES = ['Small', 'Medium', 'Large', 'Extra large'];
+// Big tablets (like a Galaxy Tab Ultra, ~1480px wide) start with large photos.
+const tileSize = () => Number(localStorage.getItem('tileSize')) || (Math.max(screen.width, screen.height) >= 1200 ? 200 : 150);
 const canPickFolder = 'showDirectoryPicker' in window;
 
 // id -> { id, name, size, lastModified, type, order, blob, thumb }
@@ -440,7 +443,7 @@ function renderPhotos() {
 }
 
 function applyTileSize() {
-  const size = Number(localStorage.getItem('tileSize')) || TILE_SIZES[1];
+  const size = tileSize();
   document.documentElement.style.setProperty('--tile', size + 'px');
 }
 
@@ -1186,8 +1189,8 @@ async function storageSummary() {
 }
 
 async function showMenu() {
-  const size = Number(localStorage.getItem('tileSize')) || TILE_SIZES[1];
-  const sizeName = ['Small', 'Medium', 'Large'][TILE_SIZES.indexOf(size)] || 'Medium';
+  const size = tileSize();
+  const sizeName = TILE_NAMES[TILE_SIZES.indexOf(size)] || 'Medium';
   const last = backupStatus.at
     ? new Date(backupStatus.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
     : 'never';

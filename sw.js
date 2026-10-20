@@ -1,6 +1,6 @@
 // Network first so updates show up straight away, but if the network is
 // slow or missing the cached copy is used, so the app always opens.
-const CACHE = 'slide-sorter-v3';
+const CACHE = 'slide-sorter-v4';
 const NETWORK_WAIT_MS = 3000;
 const FILES = [
   './',
