@@ -299,13 +299,15 @@ function restoreUi() {
   ui.filterTags?.forEach(t => filter.tags.add(t));
   filter.untagged = !!ui.filterUntagged;
   normalize(); // drops filter tags that no longer exist
-  if (ui.tagger?.ids) {
-    const live = new Set(state.order);
-    tagger.mode = ui.tagger.mode;
-    tagger.ids = ui.tagger.ids.filter(id => live.has(id));
+  if (ui.tagger) {
     tagger.lastTags = ui.tagger.lastTags || [];
-    const at = tagger.ids.indexOf(ui.tagger.current);
-    tagger.index = at >= 0 ? at : ui.tagger.current ? 0 : tagger.ids.length;
+    if (ui.tagger.mode === 'selection') {
+      const live = new Set(state.order);
+      startTagger('selection', (ui.tagger.ids || []).filter(id => live.has(id)));
+      tagger.index = Math.max(0, tagger.ids.indexOf(ui.tagger.current));
+    } else {
+      startTagger(ui.tagger.mode === 'all' ? 'all' : 'untagged', null, ui.tagger.current);
+    }
   }
 }
 
@@ -515,12 +517,21 @@ function sheetAdd() {
 
 const tagger = { mode: 'untagged', ids: [], index: 0, lastTags: [], url: null, shownId: null };
 
-function startTagger(mode, ids) {
+// Builds the list of photos to step through, starting from the first one.
+// In "all" mode it stays on `keep` if given. Untagged mode always starts at
+// the first photo still needing tags, which is also where he left off.
+function startTagger(mode, ids, keep = null) {
   tagger.mode = mode;
   tagger.ids = ids || (mode === 'untagged'
     ? displayOrder(state.order.filter(id => !tagIdsOf(id).length), tagsOf)
     : displayOrder(state.order, tagsOf));
-  tagger.index = 0;
+  tagger.index = Math.max(0, mode === 'all' && keep ? tagger.ids.indexOf(keep) : 0);
+}
+
+// Re-makes the list (picking up newly added photos), unless he's going
+// through a hand-picked selection.
+function refreshTagger() {
+  if (tagger.mode !== 'selection') startTagger(tagger.mode, null, taggerId());
 }
 
 const taggerId = () => tagger.ids[tagger.index];
@@ -641,7 +652,8 @@ function taggerAdd() {
 
 function showTagger(ids) {
   if (ids) startTagger('selection', ids);
-  else if (!tagger.ids.length || tagger.index >= tagger.ids.length) startTagger(tagger.mode === 'selection' ? 'untagged' : tagger.mode);
+  else if (tagger.mode === 'selection' && tagger.index >= tagger.ids.length) startTagger('untagged');
+  else refreshTagger();
   selection = [];
   moving = false;
   view = 'tagger';
@@ -912,6 +924,7 @@ async function importFiles(files) {
   }
 
   state.order.push(...added.sort(byImport));
+  if (added.length) refreshTagger();
   if (restored.length) {
     state.removed = state.removed.filter(id => !restored.includes(id));
     state.order.push(...restored);
