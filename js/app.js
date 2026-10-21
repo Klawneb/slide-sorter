@@ -720,10 +720,12 @@ const confirmIt = (title, message, yes, danger = false) => ask({
   title, message, buttons: [{ label: 'Cancel' }, { label: yes, value: true, primary: !danger, danger }],
 });
 
+// total = null shows a moving bar, for waits of unknown length.
 function showProgress(text, done = 0, total = 1) {
   $('progress').hidden = false;
   $('progress-text').textContent = text;
-  $('progress-bar').style.width = `${total ? (100 * done) / total : 0}%`;
+  $('progress-bar').classList.toggle('indeterminate', total === null);
+  $('progress-bar').style.width = total === null ? '' : `${total ? (100 * done) / total : 0}%`;
 }
 const hideProgress = () => { $('progress').hidden = true; };
 
@@ -849,6 +851,7 @@ const IMPORT_PARALLEL = 3;
 
 async function importFiles(files) {
   files = files.filter(isImage);
+  if (!files.length) hideProgress();
   if (!files.length) return tell('No photos found', 'None of the chosen files look like photos.');
 
   const existing = new Map([...photos.values()].map(p => [fileKey(p), p.id]));
@@ -934,7 +937,7 @@ async function addPhotos() {
   });
   if (choice === 'files') pickFiles();
   else if (choice === 'folder') importFolder();
-  else if (choice === 'gallery') $('file-input').click();
+  else if (choice === 'gallery') openFileInput('file-input');
 }
 
 // Prefer the system file browser where Chrome offers it: unlike the file
@@ -943,13 +946,42 @@ async function pickFiles() {
   if ('showOpenFilePicker' in window) {
     try {
       const handles = await window.showOpenFilePicker({ multiple: true });
-      return importFiles(await Promise.all(handles.map(h => h.getFile())));
+      let ready = 0;
+      showProgress(`Getting your photos ready… 0 of ${handles.length}`, 0, handles.length);
+      const files = await Promise.all(handles.map(async h => {
+        const file = await h.getFile();
+        ready++;
+        showProgress(`Getting your photos ready… ${ready} of ${handles.length}`, ready, handles.length);
+        return file;
+      }));
+      return importFiles(files);
     } catch (err) {
+      hideProgress();
       if (err.name === 'AbortError') return;
       console.warn('File picker failed, using the file input instead', err);
     }
   }
-  $('file-input-files').click();
+  openFileInput('file-input-files');
+}
+
+// With the file input, Android can take a while to hand over the chosen
+// files after the picker closes. Show that something is happening as soon
+// as the app is back on screen.
+let waitingForPick = false;
+function openFileInput(id) {
+  waitingForPick = true;
+  $(id).click();
+}
+function pickerClosed() {
+  if (!waitingForPick || document.hidden) return;
+  showProgress('Getting your photos ready…', 0, null);
+  // Normally replaced by the import's own progress, or cleared on cancel.
+  setTimeout(() => {
+    if (waitingForPick) {
+      waitingForPick = false;
+      hideProgress();
+    }
+  }, 60_000);
 }
 
 async function importFolder() {
@@ -961,8 +993,16 @@ async function importFolder() {
     return;
   }
   const files = [];
-  for await (const handle of dir.values()) {
-    if (handle.kind === 'file') files.push(await handle.getFile());
+  showProgress('Looking through the folder…', 0, null);
+  try {
+    for await (const handle of dir.values()) {
+      if (handle.kind !== 'file') continue;
+      files.push(await handle.getFile());
+      showProgress(`Looking through the folder… found ${files.length}`, 0, null);
+    }
+  } catch (err) {
+    hideProgress();
+    return tell('Couldn’t read the folder', err.message);
   }
   await importFiles(files);
 }
@@ -1333,11 +1373,19 @@ function wire() {
   $('btn-add').addEventListener('click', addPhotos);
   for (const id of ['file-input', 'file-input-files']) {
     $(id).addEventListener('change', e => {
+      waitingForPick = false;
       const files = [...e.target.files];
       e.target.value = '';
       if (files.length) importFiles(files);
+      else hideProgress();
+    });
+    $(id).addEventListener('cancel', () => {
+      waitingForPick = false;
+      hideProgress();
     });
   }
+  document.addEventListener('visibilitychange', pickerClosed);
+  window.addEventListener('focus', pickerClosed);
   $('btn-tags').addEventListener('click', manageTags);
   $('btn-undo').addEventListener('click', undo);
   $('btn-export').addEventListener('click', exportPhotos);

@@ -410,3 +410,14 @@ button { font: inherit; }
 }
 .notice.error { background: #fde8e6; border-bottom-color: #e7a7a1; color: #7d1a14; }
 .notice-buttons { display: flex; gap: 8px; }
+
+/* Moving bar for waits of unknown length */
+.progress-bar.indeterminate {
+  width: 35%;
+  transition: none;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(290%); }
+}
