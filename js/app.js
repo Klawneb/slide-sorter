@@ -898,9 +898,24 @@ async function addPhotos() {
       { label: 'Cancel' },
     ],
   });
-  if (choice === 'files') $('file-input-files').click();
+  if (choice === 'files') pickFiles();
   else if (choice === 'folder') importFolder();
   else if (choice === 'gallery') $('file-input').click();
+}
+
+// Prefer the system file browser where Chrome offers it: unlike the file
+// input, it can't be redirected to a default app such as Google Photos.
+async function pickFiles() {
+  if ('showOpenFilePicker' in window) {
+    try {
+      const handles = await window.showOpenFilePicker({ multiple: true });
+      return importFiles(await Promise.all(handles.map(h => h.getFile())));
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      console.warn('File picker failed, using the file input instead', err);
+    }
+  }
+  $('file-input-files').click();
 }
 
 async function importFolder() {
