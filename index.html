@@ -27,6 +27,8 @@
       <button id="btn-menu" class="btn" aria-label="More options">⋯</button>
     </div>
     <input id="file-input" type="file" accept="image/*" multiple hidden>
+    <!-- No "accept" filter, so Android opens its Files app (folders) instead of the photo picker. -->
+    <input id="file-input-files" type="file" multiple hidden>
     <input id="restore-input" type="file" accept=".zip,application/zip" hidden>
   </header>
 

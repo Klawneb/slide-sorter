@@ -885,6 +885,24 @@ async function importFiles(files) {
   if (skipped) tell('Some photos were already here', `${skipped} of the chosen photos had already been added, so they were skipped.`);
 }
 
+// Android sends image-only pickers to its photo picker (often just Google
+// Photos), so folders on the tablet are reached through the Files option.
+async function addPhotos() {
+  const choice = await ask({
+    title: 'Add photos from…',
+    stacked: true,
+    buttons: [
+      { label: 'Files and folders on this tablet', value: 'files', primary: true },
+      ...(canPickFolder ? [{ label: 'A whole folder (adds every photo in it)', value: 'folder' }] : []),
+      { label: 'Gallery / Google Photos', value: 'gallery' },
+      { label: 'Cancel' },
+    ],
+  });
+  if (choice === 'files') $('file-input-files').click();
+  else if (choice === 'folder') importFolder();
+  else if (choice === 'gallery') $('file-input').click();
+}
+
 async function importFolder() {
   let dir;
   try {
@@ -1263,12 +1281,14 @@ function wire() {
   $('tab-photos').addEventListener('click', () => { leaveTaggerPhoto(); view = 'photos'; render(); });
   $('tab-tagger').addEventListener('click', () => showTagger());
 
-  $('btn-add').addEventListener('click', () => $('file-input').click());
-  $('file-input').addEventListener('change', e => {
-    const files = [...e.target.files];
-    e.target.value = '';
-    if (files.length) importFiles(files);
-  });
+  $('btn-add').addEventListener('click', addPhotos);
+  for (const id of ['file-input', 'file-input-files']) {
+    $(id).addEventListener('change', e => {
+      const files = [...e.target.files];
+      e.target.value = '';
+      if (files.length) importFiles(files);
+    });
+  }
   $('btn-tags').addEventListener('click', manageTags);
   $('btn-undo').addEventListener('click', undo);
   $('btn-export').addEventListener('click', exportPhotos);
