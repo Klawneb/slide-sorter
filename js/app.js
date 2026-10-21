@@ -1,6 +1,6 @@
 import * as db from './db.js';
 import { makeZip, readZip } from './zip.js';
-import { setJpegDate } from './exif.js';
+import { setJpegDate, jpegInfo } from './exif.js';
 import { sortTags, yearOf, displayOrder, planExport } from './tags.js';
 
 const $ = id => document.getElementById(id);
@@ -817,7 +817,20 @@ const isImage = f => f.type.startsWith('image/') || IMAGE_EXT.test(f.name);
 
 async function makeThumb(file) {
   try {
-    const bmp = await createImageBitmap(file);
+    // Decode straight to thumbnail size when the JPEG header gives the size.
+    // Skipped for rotated photos, where the size in the header is sideways.
+    const info = await jpegInfo(file).catch(() => null);
+    let bmp;
+    if (info && info.width && info.height && info.orientation <= 1) {
+      const scale = Math.min(1, THUMB_SIZE / Math.min(info.width, info.height));
+      bmp = await createImageBitmap(file, {
+        resizeWidth: Math.round(info.width * scale),
+        resizeHeight: Math.round(info.height * scale),
+        resizeQuality: 'medium',
+      });
+    } else {
+      bmp = await createImageBitmap(file);
+    }
     const scale = Math.min(1, THUMB_SIZE / Math.min(bmp.width, bmp.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(bmp.width * scale);
@@ -829,6 +842,10 @@ async function makeThumb(file) {
     return null; // the browser can't decode it; the tile falls back to the original
   }
 }
+
+// Photos processed at the same time. Chrome decodes and encodes images off
+// the main thread, so this keeps several cores busy.
+const IMPORT_PARALLEL = 3;
 
 async function importFiles(files) {
   files = files.filter(isImage);
@@ -849,25 +866,41 @@ async function importFiles(files) {
   fresh.sort((a, b) => a.lastModified - b.lastModified || a.name.localeCompare(b.name, undefined, { numeric: true }));
 
   checkStorage();
+  // Numbered up front so the order stays right even though photos finish
+  // out of order. Each photo is stored as soon as it's ready; if the app is
+  // closed part way, the stored ones are picked up again on the next start.
+  const queue = fresh.map(f => ({ f, order: state.nextOrder++ }));
+  const added = [];
+  let done = 0;
+  showProgress(`Adding photos… 0 of ${fresh.length}`, 0, fresh.length);
   try {
-    for (let i = 0; i < fresh.length; i++) {
-      showProgress(`Adding photos… ${i + 1} of ${fresh.length}`, i, fresh.length);
-      const f = fresh[i];
-      const photo = {
-        id: newId(),
-        name: f.name,
-        size: f.size,
-        lastModified: f.lastModified,
-        type: f.type,
-        order: state.nextOrder++,
-        blob: f,
-        thumb: await makeThumb(f),
-      };
-      await db.putPhoto(photo);
-      photos.set(photo.id, photo);
-      state.order.push(photo.id);
-      persist();
-    }
+    let failed = null;
+    const worker = async () => {
+      while (queue.length && !failed) {
+        const { f, order } = queue.shift();
+        try {
+          const photo = {
+            id: newId(),
+            name: f.name,
+            size: f.size,
+            lastModified: f.lastModified,
+            type: f.type,
+            order,
+            blob: f,
+            thumb: await makeThumb(f),
+          };
+          await db.putPhoto(photo);
+          photos.set(photo.id, photo);
+          added.push(photo.id);
+        } catch (err) {
+          failed = failed || err;
+        }
+        done++;
+        showProgress(`Adding photos… ${done} of ${fresh.length}`, done, fresh.length);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(IMPORT_PARALLEL, fresh.length) }, worker));
+    if (failed) throw failed;
   } catch (err) {
     console.error(err);
     await tell('Couldn’t add all the photos', `Something went wrong: ${err.message}. The photos added so far have been kept.`);
@@ -875,6 +908,7 @@ async function importFiles(files) {
     hideProgress();
   }
 
+  state.order.push(...added.sort(byImport));
   if (restored.length) {
     state.removed = state.removed.filter(id => !restored.includes(id));
     state.order.push(...restored);

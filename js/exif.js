@@ -102,6 +102,34 @@ function readOrientation(tiff) {
   return 0;
 }
 
+// Width, height and EXIF orientation from a JPEG's header, read from just
+// the first part of the file. Null if it isn't a JPEG or can't be read.
+export async function jpegInfo(blob) {
+  const head = new Uint8Array(await blob.slice(0, 256 * 1024).arrayBuffer());
+  if (head[0] !== 0xff || head[1] !== 0xd8) return null;
+  let orientation = 0;
+  let pos = 2;
+  while (pos + 9 < head.length && head[pos] === 0xff) {
+    const marker = head[pos + 1];
+    if (marker === 0xff) { pos++; continue; }
+    const length = (head[pos + 2] << 8) | head[pos + 3];
+    if (marker === 0xe1 && startsWith(head, pos + 4, 'Exif\0\0')) {
+      orientation = readOrientation(head.subarray(pos + 10, pos + 2 + length));
+    }
+    // SOF0-SOF15, except DHT (c4), JPG (c8) and DAC (cc), hold the size.
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return {
+        height: (head[pos + 5] << 8) | head[pos + 6],
+        width: (head[pos + 7] << 8) | head[pos + 8],
+        orientation,
+      };
+    }
+    if (marker === 0xda) break;
+    pos += 2 + length;
+  }
+  return null;
+}
+
 const startsWith = (bytes, at, text) => [...text].every((c, i) => bytes[at + i] === c.charCodeAt(0));
 
 // Returns a new JPEG Blob with the date and tags set, or null if the file
