@@ -353,6 +353,7 @@ button { font: inherit; }
   width: min(560px, 92vw);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
+.dialog.wide { width: min(900px, 96vw); }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
 .dialog h3 { margin: 0 0 10px; }
 .dialog .tag-entry { margin: 12px 0; }
@@ -421,3 +422,35 @@ button { font: inherit; }
   from { transform: translateX(-100%); }
   to { transform: translateX(290%); }
 }
+
+/* Duplicates review */
+.dupe-groups { max-height: 62vh; overflow-y: auto; }
+.dupe-groups p { margin-top: 0; }
+.dupe-row { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 0; border-top: 1px solid var(--border); }
+.dupe {
+  position: relative;
+  width: 200px;
+  max-width: calc(50% - 5px);
+  padding: 0;
+  border: 4px solid var(--primary);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+  cursor: pointer;
+  text-align: left;
+}
+.dupe img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #1d1d1d; }
+.dupe-mark {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: bold;
+}
+.dupe-info { display: block; padding: 4px 8px; font-size: 0.8rem; color: var(--muted); }
+.dupe.gone { border-color: var(--danger); }
+.dupe.gone img { opacity: 0.45; }
+.dupe.gone .dupe-mark { background: var(--danger); }

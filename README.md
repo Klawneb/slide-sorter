@@ -17,7 +17,10 @@ Undated - 0157 - Beach.jpg
 ```
 
 - Photos sort by **year tag** (any tag that is a 4-digit year), then **month tag**
-  (optional, "July"/"Jul"), then the order arranged in the app. Photos without a year come last.
+  (optional, "July"/"Jul"), then by their **other tags**, then the order arranged in the app.
+  Photos without a year come last. Grouping compares each photo's tags most-used first, so
+  photos sharing common tags sit together (e.g. Beach, then Beach + London, then London),
+  and untagged ones go after them. Filenames list the tags in that same order.
 - The running number comes before the other tags, so sorting by filename keeps that order.
 - For JPEGs with a year tag, the EXIF date taken is set to the 1st of that month
   (January if no month), one minute apart in order. The tags are written to the
@@ -45,6 +48,7 @@ Pushing to `main` redeploys GitHub Pages. After changing files, bump `CACHE` in
 - `js/app.js`: UI, state, import/export
 - `js/tags.js`: tag rules (years, months), display order, export filenames and dates
 - `js/exif.js`: lossless JPEG EXIF date writer
+- `js/dupes.js`: finding photos that look the same (difference hash)
 - `js/zip.js`: minimal ZIP writer
 - `js/db.js`: IndexedDB storage
 - `sw.js`: offline cache

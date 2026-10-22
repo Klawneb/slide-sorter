@@ -1,7 +1,8 @@
 import * as db from './db.js';
 import { makeZip, readZip } from './zip.js';
 import { setJpegDate, jpegInfo } from './exif.js';
-import { sortTags, yearOf, displayOrder, planExport } from './tags.js';
+import { sortTags, yearOf, displayOrder, labelTags, planExport } from './tags.js';
+import { imageHash, findDuplicates } from './dupes.js';
 
 const $ = id => document.getElementById(id);
 
@@ -50,6 +51,9 @@ function tagCounts() {
   return counts;
 }
 
+// Grouped using counts from all photos, so any subset keeps the same order.
+const shownOrder = ids => displayOrder(ids, tagsOf, tagCounts());
+
 function visibleIds() {
   const shown = state.order.filter(id => {
     const tags = tagIdsOf(id);
@@ -57,7 +61,7 @@ function visibleIds() {
     for (const t of filter.tags) if (!tags.includes(t)) return false;
     return true;
   });
-  return displayOrder(shown, tagsOf);
+  return shownOrder(shown);
 }
 
 // Make the state consistent with the photos we actually have.
@@ -228,12 +232,14 @@ function tileFor(id) {
   return el;
 }
 
-function updateTile(el) {
+function updateTile(el, counts = tagCounts()) {
   const id = el.dataset.id;
   const n = selection.indexOf(id);
   el.classList.toggle('selected', n >= 0);
   el.querySelector('.badge').textContent = n >= 0 ? n + 1 : '';
-  el.querySelector('.caption').textContent = sortTags(tagsOf(id)).map(t => t.name).join(', ');
+  const tags = tagsOf(id);
+  el.querySelector('.caption').textContent = [...sortTags(tags.filter(t => yearOf(t.name) !== null)), ...labelTags(tags, counts)]
+    .map(t => t.name).join(', ');
 }
 
 function slot(index) {
@@ -409,6 +415,7 @@ function renderPhotos() {
     : `All photos: ${state.order.length}`;
   $('btn-show-all').hidden = !filtering;
   $('btn-select-all').hidden = !ids.length;
+  $('btn-dupes').hidden = state.order.length < 2;
   $('btn-select-all').textContent = ids.length && ids.every(id => selection.includes(id)) ? 'Select none' : 'Select all';
 
   // Grid, with a heading wherever the year changes
@@ -430,7 +437,7 @@ function renderPhotos() {
       }
       if (moving) grid.append(slot(i));
       const t = tileFor(id);
-      updateTile(t);
+      updateTile(t, counts);
       grid.append(t);
     });
     if (moving) grid.append(slot(ids.length));
@@ -523,8 +530,8 @@ const tagger = { mode: 'untagged', ids: [], index: 0, lastTags: [], url: null, s
 function startTagger(mode, ids, keep = null) {
   tagger.mode = mode;
   tagger.ids = ids || (mode === 'untagged'
-    ? displayOrder(state.order.filter(id => !tagIdsOf(id).length), tagsOf)
-    : displayOrder(state.order, tagsOf));
+    ? shownOrder(state.order.filter(id => !tagIdsOf(id).length))
+    : shownOrder(state.order));
   tagger.index = Math.max(0, mode === 'all' && keep ? tagger.ids.indexOf(keep) : 0);
 }
 
@@ -672,8 +679,9 @@ $('dialog').addEventListener('close', () => {
 
 // Shows a modal. Resolves to the clicked button's value (or { value, text }
 // when there is a text input), or null if dismissed.
-function ask({ title, message = '', input = null, buttons, stacked = false }) {
+function ask({ title, message = '', input = null, buttons, stacked = false, wide = false }) {
   const dialog = $('dialog');
+  dialog.classList.toggle('wide', wide);
   $('dialog-title').textContent = title;
   const msg = $('dialog-message');
   msg.replaceChildren();
@@ -1020,6 +1028,118 @@ async function importFolder() {
   await importFiles(files);
 }
 
+// ---------- Duplicates ----------
+
+// Hashes are worked out from the thumbnails when first needed, and kept
+// until the app is closed.
+const photoHashes = new Map();
+
+async function hashPhotos(ids) {
+  const queue = ids.filter(id => !photoHashes.has(id));
+  const total = queue.length;
+  let done = 0;
+  if (total) showProgress(`Looking for duplicates… 0 of ${total}`, 0, total);
+  const worker = async () => {
+    while (queue.length) {
+      const p = photos.get(queue.shift());
+      try {
+        photoHashes.set(p.id, await imageHash(p.thumb || p.blob));
+      } catch {
+        photoHashes.set(p.id, null); // can't be decoded, so can't be compared
+      }
+      done++;
+      showProgress(`Looking for duplicates… ${done} of ${total}`, done, total);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(IMPORT_PARALLEL, total) }, worker));
+  hideProgress();
+}
+
+// The copy to keep: the one with the most tags, then the biggest file
+// (usually the better scan).
+function bestCopy(ids) {
+  return [...ids].sort((a, b) => tagIdsOf(b).length - tagIdsOf(a).length || photos.get(b).size - photos.get(a).size)[0];
+}
+
+const fileSize = n => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1e3)} KB`);
+
+async function findDupes() {
+  clearSelection();
+  const ids = shownOrder(state.order);
+  await hashPhotos(ids);
+  const groups = findDuplicates(ids, id => photoHashes.get(id));
+  if (!groups.length) return tell('No duplicates found', `None of the ${plural(ids.length, 'photo')} look the same as another.`);
+
+  // Every copy but the best one starts marked for removal.
+  const remove = new Set();
+  for (const g of groups) {
+    const keep = bestCopy(g);
+    g.forEach(id => id !== keep && remove.add(id));
+  }
+
+  const list = document.createElement('div');
+  list.className = 'dupe-groups';
+  const intro = document.createElement('p');
+  intro.textContent = `Found ${plural(groups.length, 'set')} of photos that look the same. Tap a photo to switch between Keep and Remove. ` +
+    'Tags on removed copies are added to the kept one.';
+  list.append(intro);
+  let button = null;
+  const update = () => {
+    for (const el of list.querySelectorAll('.dupe')) {
+      const gone = remove.has(el.dataset.id);
+      el.classList.toggle('gone', gone);
+      el.querySelector('.dupe-mark').textContent = gone ? 'Remove' : '✓ Keep';
+    }
+    if (button) {
+      button.textContent = remove.size ? `Remove ${plural(remove.size, 'photo')}` : 'Remove';
+      button.disabled = !remove.size;
+    }
+  };
+  for (const g of groups) {
+    const row = document.createElement('div');
+    row.className = 'dupe-row';
+    for (const id of g) {
+      const p = photos.get(id);
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'dupe';
+      el.dataset.id = id;
+      el.innerHTML = '<img alt=""><span class="dupe-mark"></span><span class="dupe-info"></span>';
+      el.querySelector('img').src = thumbUrl(p);
+      const tags = sortTags(tagsOf(id)).map(t => t.name).join(', ');
+      el.querySelector('.dupe-info').textContent = fileSize(p.size) + (tags ? ' · ' + tags : '');
+      el.addEventListener('click', () => {
+        if (remove.has(id)) remove.delete(id);
+        else remove.add(id);
+        update();
+      });
+      row.append(el);
+    }
+    list.append(row);
+  }
+
+  const answer = ask({
+    title: 'Duplicates',
+    message: list,
+    wide: true,
+    buttons: [{ label: 'Cancel' }, { label: 'Remove', value: true, danger: true }],
+  });
+  button = $('dialog-buttons').lastChild;
+  update();
+  if (!(await answer)) return;
+
+  const gone = [...remove];
+  change(() => {
+    for (const g of groups) {
+      const kept = g.filter(id => !remove.has(id));
+      for (const id of g) if (remove.has(id)) tagIdsOf(id).forEach(t => addTag(t, kept));
+    }
+    state.order = state.order.filter(id => !remove.has(id));
+    state.removed.push(...gone);
+  });
+  tell('Duplicates removed', `${plural(gone.length, 'photo')} taken out, so they won’t be exported. Tap “↶ Undo” to bring them back.`);
+}
+
 // ---------- Viewer ----------
 
 const viewer = { ids: [], id: null, url: null, canSelect: false };
@@ -1345,8 +1465,9 @@ function showHelp() {
     'Open the Tagger to go through photos one at a time. Type or tap tags like “1980”, “Christmas”, “Beach”, then tap Next. “Same as last photo” copies the previous photo’s tags.',
     'A year tag (like 1980) puts the photo in that year. A month tag (like July) is optional.',
     'On the Photos screen, tap tags at the top to show only those photos.',
-    'Tap photos to select them, then “Tags…” to tag them all at once, or “Move…” to change their order within a year.',
+    'Tap photos to select them, then “Tags…” to tag them all at once, or “Move…” to change their order. Photos with the same tags are kept together within each year.',
     'Tap ⤢ on a photo to see it bigger. Made a mistake? Tap “↶ Undo”.',
+    '“Find duplicates” shows photos that were scanned or added twice, so you can remove the extra copies.',
     'Your work is saved as you go, and the app opens where you left off. When finished, tap Export.',
     'Now and then, use ⋯ → “Back up everything” and keep the file somewhere safe, like Google Drive.',
   ]) {
@@ -1421,6 +1542,7 @@ function wire() {
     filter.untagged = false;
     render();
   });
+  $('btn-dupes').addEventListener('click', findDupes);
   $('btn-select-all').addEventListener('click', () => {
     const ids = visibleIds();
     if (ids.every(id => selection.includes(id))) selection = selection.filter(id => !ids.includes(id));
@@ -1437,7 +1559,7 @@ function wire() {
   });
 
   $('btn-tag-selected').addEventListener('click', openSheet);
-  $('btn-tag-one-by-one').addEventListener('click', () => showTagger(displayOrder(selection, tagsOf)));
+  $('btn-tag-one-by-one').addEventListener('click', () => showTagger(shownOrder(selection)));
   $('btn-move').addEventListener('click', () => { moving = true; render(); });
   $('btn-remove').addEventListener('click', () => removeSelection());
   $('btn-clear').addEventListener('click', () => {

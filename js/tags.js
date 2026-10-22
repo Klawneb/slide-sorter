@@ -41,17 +41,61 @@ function dating(tags) {
   };
 }
 
+const isDate = t => yearOf(t.name) !== null || monthOf(t.name) !== null;
+
+// Most-used tags first (`counts` maps tag id -> photos with it), then A-Z.
+function byUse(counts) {
+  return (a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0)
+    || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+// A photo's non-date tags, most-used first. Sorting on this keeps photos
+// with the same tags together, and a rarely used tag can't pull a photo away
+// from the group of its common ones.
+function groupKey(tags, counts) {
+  return tags.filter(t => !isDate(t)).sort(byUse(counts));
+}
+
+export function countTags(ids, tagsOf) {
+  const counts = new Map();
+  for (const id of ids) for (const t of tagsOf(id)) counts.set(t.id, (counts.get(t.id) || 0) + 1);
+  return counts;
+}
+
 // The order photos are shown in and exported in: by year (undated last),
-// then month, then the order he arranged them in.
-export function displayOrder(ids, tagsOf) {
-  const key = new Map(ids.map((id, i) => [id, { ...dating(tagsOf(id)), i }]));
+// then month, then grouped by their other tags, then the order he arranged
+// them in. `counts` should cover all photos, so a filtered view keeps the
+// same order as the full one.
+export function displayOrder(ids, tagsOf, counts = countTags(ids, tagsOf)) {
+  const cmp = byUse(counts);
+  const key = new Map(ids.map((id, i) => {
+    const tags = tagsOf(id);
+    return [id, { ...dating(tags), group: groupKey(tags, counts), i }];
+  }));
+  const compareGroups = (ga, gb) => {
+    for (let j = 0; j < Math.min(ga.length, gb.length); j++) {
+      const c = cmp(ga[j], gb[j]);
+      if (c) return c;
+    }
+    // Untagged photos after the rest; otherwise fewer tags first.
+    if (!ga.length || !gb.length) return gb.length - ga.length;
+    return ga.length - gb.length;
+  };
   return [...ids].sort((a, b) => {
     const ka = key.get(a);
     const kb = key.get(b);
     return (ka.year ?? Infinity) - (kb.year ?? Infinity)
       || (ka.month ?? 0) - (kb.month ?? 0)
+      || compareGroups(ka.group, kb.group)
       || ka.i - kb.i;
   });
+}
+
+// A photo's tags in the order its filename and caption list them: month,
+// then the rest most-used first, matching how the photos are grouped.
+export function labelTags(tags, counts) {
+  return [...tags.filter(t => monthOf(t.name) !== null), ...groupKey(tags, counts)];
 }
 
 function cleanPart(text) {
@@ -62,19 +106,21 @@ function cleanPart(text) {
 // For each photo: its export filename, the date to write (null when it has
 // no year tag) and its tags as text.
 //   1980 - 0042 - July, Beach, Family.jpg
-// The number comes before the other tags so that sorting by name keeps his
-// order; sorting on the tag text would shuffle photos within a year.
+// The number comes before the other tags so that sorting by name keeps the
+// display order; sorting on the tag text would shuffle photos within a year.
 export function planExport(ids, tagsOf, extensionOf) {
-  const ordered = displayOrder(ids, tagsOf);
+  const counts = countTags(ids, tagsOf);
+  const ordered = displayOrder(ids, tagsOf, counts);
   const pad = Math.max(4, String(ordered.length).length);
   const minutes = new Map(); // photos dated so far per year/month
   return ordered.map((id, i) => {
     const tags = sortTags(tagsOf(id));
-    const { year, month, monthTag } = dating(tags);
+    const { year, month } = dating(tags);
     const primaryYear = year !== null && tags.find(t => yearOf(t.name) === year);
+    // Any extra year tags (when he wasn't sure) go after the rest.
     const labels = [
-      ...(monthTag ? [monthTag] : []),
-      ...tags.filter(t => t !== primaryYear && t !== monthTag),
+      ...labelTags(tags, counts),
+      ...tags.filter(t => yearOf(t.name) !== null && t !== primaryYear),
     ].map(t => cleanPart(t.name)).filter(Boolean);
 
     let label = labels.join(', ');
