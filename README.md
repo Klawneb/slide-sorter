@@ -11,17 +11,21 @@ Live: https://klawneb.github.io/slide-sorter/
 Each photo is exported once, into one folder:
 
 ```
-1980 - 0001 - Christmas, Family.jpg
-1980 - 0002 - July, Beach.jpg
-Undated - 0157 - Beach.jpg
+1980 - Beach - 0001.jpg
+1980 - Beach, London - 0002.jpg
+1980 - Christmas, Family - 0003.jpg
+1980-07 - Beach - 0004.jpg
+Undated - Beach - 0157.jpg
 ```
 
-- Photos sort by **year tag** (any tag that is a 4-digit year), then **month tag**
-  (optional, "July"/"Jul"), then by their **other tags**, then the order arranged in the app.
-  Photos without a year come last. Grouping compares each photo's tags most-used first, so
-  photos sharing common tags sit together (e.g. Beach, then Beach + London, then London),
-  and untagged ones go after them. Filenames list the tags in that same order.
-- The running number comes before the other tags, so sorting by filename keeps that order.
+- The name starts with the **year tag** (any tag that is a 4-digit year) and **month tag**
+  (optional, "July"/"Jul", written as `1980-07`), then the **other tags**, least-used first
+  (tags on only one photo last), so specific tags like an event decide the group before
+  broad ones like "Family". Sorting by filename therefore groups photos with the same tags
+  within each year (e.g. all "Wedding" photos together, whether or not they're also tagged
+  "Family"). Photos without a year come last.
+- The running number comes last and keeps the order arranged in the app within a group.
+  The app shows photos in exactly this filename order.
 - For JPEGs with a year tag, the EXIF date taken is set to the 1st of that month
   (January if no month), one minute apart in order. The tags are written to the
   EXIF description and Windows "Tags" field. The image data is not re-encoded,
